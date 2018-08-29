@@ -1,0 +1,93 @@
+
+# .screenrc for sdss transfer workflow
+
+# the parent workflow directory is the most convenient
+chdir /export/data/dp59.b/data/timmo/
+
+startup_message off
+defscrollback 10000
+scrollback 10000
+deflog on
+defescape ^Xx
+escape ^Xx
+
+hardstatus alwayslastline
+hardstatus string "%{kG}%50>%-w%{ky}%n %t%{-}%+w%{-} %>%=%{ky}Ctrl-X ?%{-} for help"
+
+# Wow, visual bell really sucks.
+# vbellwait 0.1
+# vbell_msg "* Ding! *"
+
+# Print message on status if activity is detected in a hidden window.
+defmonitor on
+activity "activity in window %n: %t"
+msgwait 10
+
+# Don't kill window after its child process dies.
+zombie "^["
+
+# This is for mouse scroll-wheel support.
+# Tell screen that xterm can scroll.
+termcapinfo xterm ti@:te@
+# Bind Shift+PgUp/PgDn.
+bindkey -m "^[[5;2~" stuff ^b
+bindkey -m "^[[6;2~" stuff ^f
+
+################
+# 256 colors
+# http://frexx.de/xterm-256-notes/
+# terminfo and termcap for nice 256 color terminal
+# allow bold colors - necessary for some reason
+attrcolor b ".I"
+# tell screen how to set colors. AB = background, AF=foreground
+termcapinfo xterm 'Co#256:AB=\E[48;5;%dm:AF=\E[38;5;%dm'
+# erase background with current bg color
+defbce "on"
+
+# replace dangerous kill key bindings...
+bind k
+bind ^k
+# ...with better one.
+bind 'K' kill
+
+
+caption always
+
+
+verbose on
+
+sessionname xfer
+
+# These are the screens
+
+screen -t samu  0
+#sessionname samu
+
+
+screen -t util  1
+#sessionname util
+
+
+screen -t bagupdate  2  sh -c ' cd BUILDING || exit 1 ; waitSeconds=60 ; pid=$$;  function isozdate () { date -u "+%Y-%m-%dT%H:%M:%SZ" ; } ; while true; do if ls *-*-of-* >/dev/null 2>&1 ; then for bagDir in *-*-of-*; do echo "*** ${bagDir} ***"; bagupdate "${bagDir}"; done;   fi;   echo "$(isozdate) bagupdate [$pid] monitoring ${PWD##*/}: waiting ${waitSeconds} seconds..."; sleep ${waitSeconds}; done '
+#sessionname bagupdate
+
+
+screen -t pkgverify  3  sh -c ' cd UPDATED/ || exit 1 ; waitSeconds=60 ; pid=$$;   function isozdate () { date -u "+%Y-%m-%dT%H:%M:%SZ" ; } ; while true; do if ls -d *-*-of-* 2>/dev/null ; then   for bagDir in *-*-of-*; do echo "*************"; time pkgverify "${bagDir}"; done; fi;   echo "$(isozdate) pkgverify [$pid] monitoring ${PWD##*/}: waiting ${waitSeconds} seconds..."; sleep ${waitSeconds};  done '
+
+
+screen -t bagtransfer  4  sh -c ' cd OUTGOING/ || exit 1 ; waitSeconds=60 ; pid=$$;   function isozdate () { date -u "+%Y-%m-%dT%H:%M:%SZ" ; } ; while true; do if ls *-*-of-*.tar 2>/dev/null; then   bagtransfer *-*-of-*.tar ; fi;   echo "$(isozdate) bagtransfer [$pid] monitoring ${PWD##*/}: waiting ${waitSeconds} seconds..."; sleep ${waitSeconds};  done '
+
+
+screen -t jhuvrfyxfer  5  ssh firefootpub.mse.jhu.edu  sh -c '/home/timmo/bin/monitor-sdss-xfer 2>&1 | tee -a nohup.out'
+
+
+screen -t vrfyxfer  6  sh -c ' cd TRANSFERRED/ || exit 1 ; waitSeconds=300 ; pid=$$;  function isozdate () { date -u "+%Y-%m-%dT%H:%M:%SZ" ; } ; while true; do if ls *-*-of-*.tar 2>/dev/null ; then   for bagFile in $(ssh firefootpub.mse.jhu.edu ls /sam3/sdss/archive/VALIDATED/*.tar); do bag=${bagFile##*/}; bagName=${bag%%.tar}; mv -i "${bagName}" "${bag}" "${bag}.md5" ../VALIDATED/ 2> /dev/null; if [ $? == 0 ]; then echo "$(isozdate) verify-JHU [$pid] ${bag} validated at JHU"; fi; done;  fi;  echo "$(isozdate) verify-JHU [$pid] monitoring ${PWD##*/}: waiting ${waitSeconds} seconds..."; sleep ${waitSeconds}; done '
+
+
+screen -t vrfyarchived  7  sh -c ' cd VALIDATED/ || exit 1 ; waitSeconds=300 ; pid=$$;  function isozdate () { date -u "+%Y-%m-%dT%H:%M:%SZ" ; } ; sfind="sfind /sam3/sdss/archive/VALIDATED/ /sam3/sdss/archive/raw/ImagingRaw/ -type f \( -copy 2 -a -copy 3 \) -name \"*-*-of-*.tar\""; while true; do if ls *-*-of-*.tar 2>/dev/null ; then   for bagFile in $(ssh firefootpub.mse.jhu.edu $sfind); do bagFile="${bagFile##*/}"; bagName="${bagFile%%.tar}"; bagDir="${bagName}"; md5File="${bagFile}.md5";  if [ -f "${bagFile}" ]; then echo "*** ${bagName} is ARCHIVED at JHU ***"; mv -iv "${md5File}" ../ARCHIVED/; mv -iv "${bagDir}" "${bagFile}" ../DELETEME/ ; fi ; done ; fi ;   echo "$(isozdate) verify-archived [$pid] monitoring ${PWD##*/}: waiting ${waitSeconds} seconds..."; sleep ${waitSeconds}; done '
+
+
+# [8] might have a process to move validated packages to their final home
+
+
+screen -t deleteme 9 sh -c ' cd DELETEME/ || exit 1 ; waitSeconds=300 ; pname="delete me"; pid=$$;   function isozdate () { date -u "+%Y-%m-%dT%H:%M:%SZ" ; } ; while true; do  for rmFile in $(ls -dF *-*-of-* 2>/dev/null) ; do  echo -n "$(isozdate) ${pname} [${pid}] Removing ${rmFile}... "; rm -rf ${rmFile} ; echo " ...done";  done;  echo "$(isozdate) ${pname} [${pid}] monitoring ${PWD##*/}: waiting ${waitSeconds} seconds..."; sleep ${waitSeconds};  done '
