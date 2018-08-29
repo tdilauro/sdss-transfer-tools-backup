@@ -1,0 +1,56 @@
+
+# bag-info.txt template file
+#   Bagging-Date: 
+#   Payload-Oxum: 
+#   Bag-Size: 
+#   Source-Organization: Astrophysical Research Consortium (ARC, data owner)
+#   Source-Organization: Fermi National Accelerator Laboratory (FermiLab, data
+#      host)
+#   Source-Organization: Sloan Digital Sky Survey (SDSS, project)
+#   Contact-Name: Brian Yanny
+#   Contact-Phone: +1 630-840-4413
+#   Contact-Email: yanny@fnal.gov
+#   
+#   External-Description: <EXT-DESC>
+#   Bag-Group-Identifier: <BAG-GRP-ID>
+#   Bag-Count: <SEQNUM> of <BAGCOUNT>
+#   
+#   x-Bag-Description: The Bag-Group-Identifier (BGI) field of this file is used
+#      to locate the payload in a larger hierarchy. The location of the files and 
+#      directories at the top level of the payload directory can be obtained by
+#      replacing the question mark ('?') in the BGI with the name of that file or
+#      directory.
+#   x-Bag-Scheme: <BAG-SCHEME>
+
+
+# bag-info.txt parameter replacement
+#   BAG-GRP-ID - scope in which SEQNUM of BAGCOUNT applies 
+#   - Identity of payload content can be ascertained by replacing '?' with relative path of payload file
+#   SEQNUM - $seqNum
+#   BAGCOUNT - $bagCount
+#   EXT-DESC - extDesc
+#   BAG-SCHEME - shema/profile with which this bag (tag and/or payload) complies (content model)
+# seqNum=11
+# bagCount=1063bagScheme=http://dataconservancy.org/schemes/profile/bagit/sdss-raw-bag
+#baginfo=/home/s1/timmo/projects/sdss/bagit/templates/ImagingRaw/bag-info.txt
+#bgi='http://dataconservancy.org/ids/sdss:fnal:db2/ImageRaw/?'
+#extDesc='Raw image data from the SDSS and SDSS-II projects.'
+
+
+# Maximum # of child processes, as reported by jobs
+MAXCHILDREN=8
+
+tapeDir="/pnfs"
+findPrefix="sdss/db2/ImagingRaw"
+srcDir="${tapeDir}/${findPrefix}"
+
+invFile="/home/s1/timmo/projects/sdss/ImagingRaw-Bagit-Inventory.csv"
+# "find" file is needed to verify that all payload files have been copied
+findFile="/home/s1/timmo/projects/sdss/pnfs-sdss-db2.find.gz"
+
+# bag naming convention: bagDir="${bagParentDir}/${bagNamePrefix}-${seqNum}-of-${bagCount}"
+bagNamePrefix="ImagingRaw"
+
+# Directory in which new bags should be constructed
+bagParentDir=$PWD
+
