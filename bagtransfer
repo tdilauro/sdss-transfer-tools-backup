@@ -1,0 +1,145 @@
+#!/bin/bash
+
+# get some utility functions to help use out
+source "`dirname $0`/functions-util.sh" || ( echo "Couldn't source \"functions-util.sh\". Exiting." 1>&2 ; exit 1; )
+# now load the files we need
+# include '...'
+
+
+# Transfer() destination
+transferDest="firefootpub.mse.jhu.edu:/sam3/sdss/stage"
+completionDir="../TRANSFERRED/"
+
+# Minimum time between transfer startups (in seconds)
+minTime=20
+
+
+# Maximum # of child processes, as reported by jobs
+MAXCHILDREN=4
+
+# Multithread functions
+
+function IncrementMaxChildren () {
+    jobs
+    prevMC=$MAXCHILDREN
+    ((MAXCHILDREN++))
+    echo "[ Incrementing MAXCHILDREN from ${prevMC} to ${MAXCHILDREN} ]" 1>&2
+}
+
+function DecrementMaxChildren () {
+    jobs
+    if [ "$MAXCHILDREN" -lt 2 ]; then
+	echo "[ Cannot decrement MAXCHILDREN below ${MAXCHILDREN} ]" 1>&2
+    else
+	prevMC=$MAXCHILDREN
+	((MAXCHILDREN--))
+	echo "[ Decrementing MAXCHILDREN from ${prevMC} to ${MAXCHILDREN} ]" 1>&2
+    fi
+}
+
+# Utility functions
+
+# transfer some content to the designated place
+function Transfer () {
+    transferDest=$1; shift
+    # the rest of the arguments ($@) are the source files/directories
+    scp -q -rp $@ ${transferDest};   rc=$?
+    return $rc
+}
+
+function EpochTime () { date +%s; }
+# function isozdate () { date -u "+%Y-%m-%dT%H:%M:%SZ" ; }
+# function warn () { echo $@ 1>&2; }
+
+# Log message function
+# Requires isozdate()
+#function log () {
+#    pid=$1; shift
+#    echo "$(isozdate) $PROGNAME [${pid}]: $@"
+#}
+
+
+##########
+
+if [ -z "${transferDest}" ]; then
+    warn "No \"Transfer Destination\" specified. Cannot continue."
+    exit 1
+fi
+
+##################################
+# Handle user supplied arguments
+##################################
+
+bagList=$@
+
+
+trap " echo '*** waiting for child jobs to end...'; wait; echo 'child jobs finished' " TERM EXIT
+trap " IncrementMaxChildren " USR1
+trap " DecrementMaxChildren " USR2
+
+
+# Time of last command startup (in seconds) (really need a fifo of last times)
+lastTime=0
+
+
+for bag in $bagList; do
+    # process management
+    while (( ( (( $(EpochTime) - $lastTime )) <= $minTime ) || ( $(jobs | grep '^\[[0-9]*\][ +-] *Running *' | wc -l) >= ${MAXCHILDREN} ) )); do
+        sleep 1
+	# jobs | grep "^[^ ]* *Done "
+	# echo "***************************"
+	jobs > /dev/null
+    done
+
+    # checksum file
+    md5File="${bag}.md5"
+    # base package name
+    pkgName=${bag%%.tar}
+
+    # ensure that both the bag and md5 file are present and readable
+    if [ ! -r "${bag}" ]; then
+	# warn "Bag file \"${bag}\" is missing or unreadable. Skipping this bag."
+	log ${PROGPID} "Bag file \"${bag}\" is missing or unreadable. Skipping this bag."
+	continue
+    fi
+    if [ ! -r "${md5File}" ]; then
+	# warn "Checksum file \"${md5File}\" is missing or unreadable. Skipping this bag."
+	log ${PROGPID} "Checksum file \"${md5File}\" is missing or unreadable. Skipping this bag."
+	continue
+    fi
+
+    contentLength=$(( $(stat -c "%s" "${bag}") + $(stat -c "%s" "${md5File}") ))
+
+    # Fire up the child process
+    (
+	pp=$!
+	# warn "$(isozdate) \[$pp\]: Begin transfer of ${bag} ${md5File} to ${transferDest}"
+	log  ${pp} "Begin transfer of ${bag} ${md5File} to ${transferDest}"
+	startTime=$(EpochTime)
+	Transfer "${transferDest}"  "${bag}" "${md5File}"  ;  rc=$?
+	endTime=$(EpochTime)
+
+	runTime=$(( endTime - startTime ))
+	MBps=$(( contentLength / runTime / 1000000 ))
+	if [ ${rc} -ne 0 ]; then
+	    # Transfer failed
+	    #warn "$(isozdate) \[$pp\]: Transfer of ${bag} ${md5File} to $transferDest failed, rc=${rc}"
+	    log ${pp} "Transfer of ${bag} ${md5File} to $transferDest failed, rc=${rc}"
+	else
+	    # Transfer succeded
+	    if [[ ( -d "${completionDir}" ) && ( -w "${completionDir}" ) ]]; then
+		mv "${pkgName}" "${bag}" "${md5File}" "${completionDir}"
+	    fi
+	    # warn "$(isozdate) \[$pp\]: Completed transfer of ${bag} ${md5File} to ${transferDest} - ${contentLength} bytes in ${runTime}s (${MBps} MB/s), rc=${rc}"
+	    log ${pp} "Completed transfer of ${bag} ${md5File} to ${transferDest} - ${contentLength} bytes in ${runTime}s (${MBps} MB/s), rc=${rc}"
+	fi
+    ) &
+    # note time time of the last command
+    lastTime=$(EpochTime)
+done
+
+# wait for processes to complete
+wait
+
+trap - TERM
+

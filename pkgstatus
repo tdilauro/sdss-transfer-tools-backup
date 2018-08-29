@@ -1,0 +1,102 @@
+#!/bin/bash
+# get some utility functions to help use out
+source "`dirname $0`/functions-util.sh" || ( echo "Couldn't source \"functions-util.sh\". Exiting." 1>&2 ; exit 1; )
+# now load the files we need
+include 'bagm-common'
+
+# Staging directory on receiving host
+dirTransferStage="firefoot.mse.jhu.edu:/sam3/sdss/stage/"
+
+(
+cd /export/data/dp59.b/data/timmo/
+
+function bold () { 
+    if [ "${TERMCAP}" != "" ]; then
+	format='\e[1m%s\e[0m'
+    else
+	format='%s'
+    fi
+    printf "${format}" "$@" ;
+}
+
+dirProto=${dirProto##*/}
+dirBuild=${dirBuild##*/}
+dirUpdated=${dirUpdated##*/}
+dirOutgoing=${dirOutgoing##*/}
+dirTransferred=${dirTransferred##*/}
+dirValidated=${dirValidated##*/}
+
+
+echo; echo
+
+VERBOSE=
+while getopts “v” OPTION
+do
+     case $OPTION in
+         v)
+             VERBOSE="1"
+             ;;
+     esac
+done
+
+# shift off processed arguments from $@ before proceeding
+set -- "${@:$OPTIND:$((${#@}))}"
+
+
+# list files in certain directories, if we're in verbose mode
+if [ "${VERBOSE}" == "1" ]; then
+    # Iterate over directories
+    for entry in ${dirValidated} ${dirTransferred} ${dirTransferStage} ${dirOutgoing} ${dirUpdated} ${dirBuild} ${dirProto} - */problems ; do
+	if [ ${entry} == '-' ]; then
+	    echo "-------------------------------------"
+	    echo
+	    continue
+	fi
+	
+	if [[ ( "${entry}" =~ '^(([^:]*):)?(.*)$' ) ]]; then
+	    host=${BASH_REMATCH[2]}
+	    dir=${BASH_REMATCH[3]}
+	else
+	    host='';
+	    dir=${entry}
+	fi
+	
+	label=${entry}
+	
+        # if a host is specified, use ssh to run the remote command
+	if [ ! -z "${host}" ]; then rcmd="ssh $host"; else rcmd=''; fi
+
+	$rcmd du -sh --time=ctime --time-style=long-iso ${dir}  | 
+        while read -r size date time target; 
+	  do echo "$(bold ${label}) (${size}) last mod: ${date} ${time}"; 
+	done;
+
+	$rcmd ls -ogdhp --color=none  ${dir}/*-*-of-*[0-9]* 2>/dev/null;
+	echo;
+    done
+
+
+    echo "-------------------------------------"
+fi  # $VERBOSE
+
+
+# list summary of archived files for specified packages
+
+# iterate throught the list of package prefixes and provide archiving status summary for each
+cd ${dirArchived} || die $? $( log ${PROGPID} "could not chdir to archived directory \"${dirArchived}\""  )
+
+for pkgPrefix in "$@"; do
+    # Get custom configuration
+    ( # use subshell to prevent polution of namesapce
+	configFile=$( PkgPrefixConfigFile "${pkgPrefix}" )
+	. ${configFile} || die $? $( log ${PROGPID} "${pkgName}: couldn't source config file \"${configFile}\"" )
+
+	ls -d ${pkgPrefix}-[0-9]* 2>/dev/null | sort -t- -nk2 | "${PROGHOME}/range" "${pkgPrefix}-([0-9]+)-of-${numberOfPkgs}.tar.md5"
+    )
+done
+
+echo
+echo "-------------------------------------"
+df -h . 
+echo 
+)

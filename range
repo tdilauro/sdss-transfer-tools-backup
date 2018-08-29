@@ -1,0 +1,69 @@
+#!/usr/bin/gawk -f
+
+# typical call: ls ARCHIVED/ | sort -t- -nk2 | <command-name> "ImagingRaw-([0-9]+)-of-1063.tar.md5"
+
+
+function GetVal (string) {
+  # use"0+" to ensure that value is integer
+  return  0 + gensub( pattern, "\\1", "", string ) ;
+}
+
+
+function AppendRange ( base, first, last ) {
+  # debug: print "AppendRange( base=" base ", first=" first ", last=" last ")"
+  if ( base != "" ) base = base ","
+
+  if ( first == last ) return base last ;
+  else return base first "-" last;
+}
+
+
+BEGIN {
+  count=0; first=0; last=0; mlast=0; missing=""; existing="";
+
+  if ( ARGC > 1 ) { 
+    pattern = ARGV[1] ; ARGV[1] = "-" ; 
+    res = gensub( /^([^()]+)-(.+)-of-([0-9]+).*$/, "\\1|\\3", "", pattern ) ;
+    split( res, params, "|" ) ;
+    group = params[1] ;
+    max = params[2] ;
+    pattern = "^" pattern "$";
+    # debug: print "Result: pattern=" pattern ", res=" res " -> group=" group ", max=" max
+  }
+  else max = 0 ;
+
+  # make sure max is an integer, not a string
+  max += 0 ;
+  min = 1;
+} 
+
+END { # flush out anything that we still have
+  if ( count > 0 )  { existing = AppendRange(existing, first,last) ; }
+  if ( max > last )  { missing = AppendRange(missing, last+1,  max) ; }
+
+  # have some friendlier text if missing/exisitng are blank
+  if ( missing == "" ) { missing = "(none)" ; }
+  if ( existing == "" ) { existing = "(none)" ; }
+
+  print group ": " existing ";  Missing: " missing
+}
+
+
+{ # MAIN BODY
+  val = GetVal( $0 ) ;
+
+
+  if ( count == 0 )  { count=1; 
+    if (min < val ) missing = AppendRange(missing, min, val-1) ;
+    first=val; last=val; 
+  } 
+  else if ( val == (last+1) )  { count++; last=val; } 
+  else { # if numbers are not in sequence
+    missing = AppendRange(missing, last+1, val-1) ;
+    if ( count > 0 ) existing = AppendRange(existing, first, last) ;
+
+    # reset the counters
+    first=val; last=val; count=1; 
+  }
+  # debug: print count, first, last
+}

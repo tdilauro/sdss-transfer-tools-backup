@@ -1,0 +1,150 @@
+#!/bin/bash
+
+# Maximum # of child processes, as reported by jobs
+MAXCHILDREN=8
+
+tapeDir="/pnfs"
+findPrefix="sdss/db2/ImagingRaw"
+srcDir="${tapeDir}/${findPrefix}"
+
+invFile="/home/s1/timmo/projects/sdss/ImagingRaw-Bagit-Inventory.csv"
+# "find" file is needed to verify that all payload files have been copied
+findFile="/home/s1/timmo/projects/sdss/pnfs-sdss-db2.find.gz"
+
+
+# functions
+function die () { echo "error $?: $*" 1>&2; }
+
+
+# start with 0 errors
+errors=0
+
+PRG=$0
+currDir=$PWD
+###########
+# newline variable - next command spans two lines
+NL='
+'
+###########
+
+seqNum=$1; shift
+#invFile=$1; shift
+
+# number of bags in this group
+bagCount=$( cat $invFile | grep "^Bag-Count-Of," | cut -d, -f2 )
+
+bagParentDir=$PWD
+bagNamePrefix="ImagingRaw"
+bagDir="${bagParentDir}/${bagNamePrefix}-${seqNum}-of-${bagCount}"
+payloadDir="${bagDir}/data"
+mkdir -p $payloadDir || die "couldn't make directory $payloadDir"
+
+
+# list of subdirectories for a given array
+dirList=$( cat $invFile | grep "^${seqNum}," | cut -d, -f3 )
+dirCount=$( echo "${dirList}" | wc -w )
+echo "There are ${dirCount} subdirectories in this bag."
+
+
+# make directories into which payload files will be copied from tape (via encp)
+for dir in $dirList; do 
+    echo "Making directory: \"${payloadDir}/${dir}\" " 1>&2
+    mkdir "${payloadDir}/${dir}" || die "couldn't make directory \"${payloadDir}/${dir}\" "
+done
+
+
+
+# transfer the content from tape
+# NB: encp does not do recursive directory copy and only files can be specified as source
+# encp --usage
+# Usage: 
+#       encp [OPTIONS]... <source file> <destination file>
+#       encp [OPTIONS]... <source file> [source file [...]] <destination directory>
+#
+# This section uses multiple threads
+if [ -f "/fnal/ups/etc/setups.sh" ]
+then
+    . "/fnal/ups/etc/setups.sh"
+fi
+setup -q stken encp
+trap " echo 'waiting for child jobs to end...'; wait; echo 'child jobs finished' " TERM
+
+for dir in $dirList; do 
+    #
+    while (( $(jobs | wc -l) >= ${MAXCHILDREN} )); do
+        sleep 1
+        jobs > /dev/null
+    done
+
+    echo "`date -u "+%Y-%m-%dT%H:%M:%SZ"` Loading directory: \"${srcDir}/${dir}\" to \"${payloadDir}/${dir}\" " 1>&2;
+
+    # This is the cammand with multiple threads
+    encp ${srcDir}/${dir}/* "${payloadDir}/${dir}"  &
+done
+# wait for all of the async processes to complete
+wait
+# clear the trap
+trap - TERM
+
+###########################################################
+# At this point, all the data should be loaded from tape. #
+###########################################################
+
+OIFS=$IFS;
+IFS=$NL
+
+
+# compare directories
+
+echo -n "There are ${dirCount} subdirectories in this bag: "
+echo $dirList
+
+echo "* Verifying all content copied to bag..."
+verifiedDirectories=0
+verifiedFiles=0
+
+for dir in $dirList; do
+    # get list of files from "find" (or from /pnfs dir)
+    fl=$( zcat ${findFile} | 
+	grep -P --regexp="sdss/db2/ImagingRaw/${dir}(/.*)?" | 
+	grep -- '^f' | 
+	cut -d'|' -f1,7,10 |  
+	sed -e 's|sdss/db2/ImagingRaw/||'; 
+	echo -n 'x' ); fl=${fl%x}
+
+    # echo "*** FL${NL}${fl}***"
+    fileList=( $fl )
+    # echo "* File list: ${fileList[@]}"
+    fileCount=${#fileList[@]}
+    # echo "${NL}Directory \"${dir}\" should have $fileCount file(s)."
+    for fileAttribs in ${fileList[@]}; do
+	# echo "File attributes: $fileAttribs"
+	IFS='| ' read -a f <<< "${fileAttribs}"
+	fname="${f[2]}"
+	fsize=${f[1]}
+	srcFile="${srcDir}/${fname}"
+	pldFile="${payloadDir}/${fname}"
+	srcSize=$( stat -c '%s' ${srcFile} )
+	pldSize=$( stat -c '%s' ${pldFile} )
+	if [ ! -f "$pldFile" ] ; then ((errors++)) ; echo "missing bagit payload file: \"${pldFile}\" " 1>&2 ; fi
+	if [ ! -f "$srcFile" ] ; then ((errors++)) ; echo "missing source file: \"${srcFile}\" " 1>&2 ; fi
+	if [ ! "${fsize}" == "${srcSize}" ] ; then ((errors++)) ; echo "size mismatch for src file \"${srcFile}\" (${srcSize}) vs. ref (${fsize})" 1>&2 ; fi
+	if [ ! "${fsize}" == "${pldSize}" ] ; then ((errors++)) ; echo "size mismatch for bagit payload file \"${pldFile}\" (${pldSize}) vs. ref (${fsize})" 1>&2 ; fi
+	# echo "File: ${fname} - sizes: ref=${fsize}, src=${srcSize}, bag=${pldSize}"
+	# echo "Size: ${fsize} for file \"${fname}\" "
+
+	((verifiedFiles++))
+    done
+
+    ((verifiedDirectories++))
+done
+IFS=$OIFS
+
+echo "${errors} error(s) encountered verifying ${verifiedDirectories} subdirectories containing ${verifiedFiles} files"
+if [ "$errors" -gt 0 ]; then 
+    exit 1
+fi
+
+
+
+exit

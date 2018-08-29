@@ -1,0 +1,81 @@
+#!/bin/bash
+
+####################################################################################################
+# Functions related to packaging
+#
+# Tim DiLauro <tim.dilauro@gmail.com>
+####################################################################################################
+
+
+
+#---------------------------------------------------------------------------------------------------
+# Function: getDirFileList
+# Given a directory path, return a list of filenames
+#---------------------------------------------------------------------------------------------------
+function getDirFileList () {
+    local dir="$@"
+
+    local findFile='/home/s1/timmo/projects/sdss/pnfs-sdss-db2.find.gz'
+    local findDirPrefix='sdss/db2/ImagingRaw'
+    local pnfsToFindFile=
+
+    local fl 
+
+    if [ ! -d "${dir}" ]; then
+	warn "getDirFileList(): \"${dir}\" is not a directory"
+	return 1
+    fi
+    
+
+    # get list of files from "find" file (though, perhaps should retrieve directly from /pnfs dir)
+    fl=$( zcat ${findFile} | 
+	grep -P --regexp="${findDirPrefix}/${dir}(/.*)?" | 
+	grep -- '^f' | 
+	cut -d'|' -f1,7,10 |  
+	sed -e "s|${findDirPrefix}/||"; 
+	echo -n 'x' ); fl=${fl%x}
+    echo "${fl}"
+}
+
+
+
+#---------------------------------------------------------------------------------------------------
+# Function: CheckFile
+# Given a file, verify that both sourced and package payload file exist and are of the correct size
+#---------------------------------------------------------------------------------------------------
+function CheckFile () {
+    # /pnfs/sdss/db2/ImagingRaw/<run>
+    # /export/data/dp59.b/data/timmo/ImagingRaw/data/<run>
+    local srcBase='/pnfs/sdss'
+    local pldBase='/export/data/dp59.b/data/timmo'
+
+    # Need mapping between src subdirectory
+    # For example:
+    #   sdss/db2/ImagingRaw -> ImagingRaw-?-of-?
+    local mapFrom="sdss/db2/ImagingRaw"
+    local mapTo="ImagingRaw-\1-of-\2/data"
+
+    local fileAttribute="$@"
+    local rc=0
+    # srcDir=?
+    # payloadDir=
+
+    # echo "File attributes: $fileAttributes"
+    IFS='| ' read -a f <<< "${fileAttributes}"
+    fname="${f[2]}"
+    fsize=${f[1]}
+
+    srcFile="${srcDir}/${fname}"
+    pldFile="${payloadDir}/${fname}"
+
+    srcSize=$( stat -c '%s' ${srcFile} )
+    pldSize=$( stat -c '%s' ${pldFile} )
+    if [ ! -f "$pldFile" ] ; then  rc=1 ; echo "missing bagit payload file: \"${pldFile}\" " 1>&2 ; fi
+    if [ ! -f "$srcFile" ] ; then  rc=1 ; echo "missing source file: \"${srcFile}\" " 1>&2 ; fi
+    if [ ! "${fsize}" == "${srcSize}" ] ; then  rc=1 ; warn "size mismatch for src file \"${srcFile}\" (${srcSize}) vs. ref (${fsize})" ; fi
+    if [ ! "${fsize}" == "${pldSize}" ] ; then  rc=1 ; warn "size mismatch for bagit payload file \"${pldFile}\" (${pldSize}) vs. ref (${fsize})" ; fi
+    # echo "File: ${fname} - sizes: ref=${fsize}, src=${srcSize}, bag=${pldSize}"
+    # echo "Size: ${fsize} for file \"${fname}\" "
+
+    return ${rc}
+}

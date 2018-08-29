@@ -1,0 +1,94 @@
+#!/bin/bash
+# get some utility functions to help use out
+source "`dirname $0`/functions-util.sh"
+# now load the files we need
+include 'bagm-common'
+
+# Only argument should be a package name
+rc=0
+if [[ ( $# == 1 ) ]]; then
+    # verify package name format and drop properties into the environment
+    getPackageProperties $1
+    rc=$?
+else
+    rc=2
+fi
+if [[ ( ${rc} == 2 ) ]]; then
+    warn "${PROGNAME} - invalid argument: $@"
+    warn "Usage: ${PROGNAME} <bagprefix>-<sequence#>-of-<bagcount>"
+fi
+if [[ ( ${rc} != 0 ) ]]; then exit 1; fi
+
+
+#
+# The preliminaries are out of the way, so verify package and build single file
+#
+
+log ${PROGPID} "$@ [starting...]"
+trap " DatedExitFunction $PROGNAME $@ " EXIT
+
+# the package file name
+pkgFile="${pkgName}.tar"
+md5File="${pkgFile}.md5"
+bagDir=${pkgName}
+
+# ensure that ${bagDir} is a directory before writing bag-info.txt
+if [ ! -d "${bagDir}" ] ; then
+    log ${PROGPID} "cannot create \"bag-info.txt\". \"${bagDir}\" is not a bag directory. Exiting. [rc=1]"
+    exit 1
+elif [ ! -w "${bagDir}" ] ; then
+    log ${PROGPID} "cannot create \"bag-info.txt\". \"${bagDir}\" is not writeable. Exiting. [rc=1]"
+    exit 1
+fi
+
+# ensure that dirOutgoing exists and is writable, so that we can move successfully verified and checksummed bags there
+if [[ ( ! -d "${dirOutgoing}" ) || ( ! -w "${dirOutgoing}" ) ]] ; then
+    log ${PROGPID} "\"${dirOutgoing}\" must be a writeable directory. Exiting. [rc=1]"
+    exit 1
+fi
+
+# Validate the directory form of the bag
+log ${PROGPID} "Validating package \"${bagDir}\"..."
+
+log ${PROGPID} "Running: \"bagit verifyvalid ${bagDir}\"..."
+bagit verifyvalid ${bagDir} ; rc=$?
+if [ ${rc} != 0 ]; then
+    log ${PROGPID} "Package validation failed [rc=${rc}]" 
+    exit ${rc}
+else
+    log ${PROGPID} "Package validation completed successfully"
+fi
+
+# Now our package is an opaque object
+# We won't look inside it again until we validate it after the transfer.
+
+# Create the package file via TAR
+log ${PROGPID} "Packaging \"${pkgName}\" into TAR file \"${pkgFile}\"..."
+tar cf "${pkgFile}" "${pkgName}" ; rc=$?
+if [ ${rc} != 0 ]; then
+    log ${PROGPID} "Packaging failed [rc=${rc}]" 
+    exit ${rc}
+else
+    log ${PROGPID} "Package file \"${pkgFile}\" created"
+fi
+
+# Generate checksum for package file
+log ${PROGPID} "Generating MD5 checksum for \"${pkgFile}\"..."
+md5sum "${pkgFile}" > "${md5File}"; rc=$?
+if [ ${rc} != 0 ]; then
+    log ${PROGPID} "Checksum generation failed [rc=${rc}]"
+    exit ${rc}
+else
+    log ${PROGPID} "Checksum generated in ${md5File}"
+fi
+
+
+# Finally, move the files for this package to the OUTGOING directory
+log ${PROGPID} "Moving  package \"${pkgName}\" content to \"${dirOutgoing}\"..."
+mv "${pkgName}" "${pkgFile}" "${md5File}" "${dirOutgoing}" ; rc=$?
+if [ ${rc} -ne 0 ] ; then
+    log ${PROGPID} "error moving package \"${pkgName}\" files to \"${dirOutgoing}\" [rc=${rc}]"
+    exit ${rc}
+else
+    log ${PROGPID} "Moved package \"${pkgName}\" files to \"${dirOutgoing}\""
+fi

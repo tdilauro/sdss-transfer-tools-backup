@@ -1,0 +1,51 @@
+#!/bin/bash
+
+
+###################################
+
+# start with 0 errors
+errors=0
+
+# save the value of IFS
+OIFS=$IFS;
+currDir=$PWD
+###########
+# newline variable - next command spans two lines
+NL='
+'
+###########
+
+# Special Directories
+dirProto='/export/data/dp59.b/data/timmo/PROTOPKG'
+dirBuild='/export/data/dp59.b/data/timmo/BUILDING'
+dirUpdated='/export/data/dp59.b/data/timmo/UPDATED'
+dirOutgoing='/export/data/dp59.b/data/timmo/OUTGOING'
+dirTransferred='/export/data/dp59.b/data/timmo/TRANSFERRED'
+dirValidated='/export/data/dp59.b/data/timmo/VALIDATED'
+dirArchived='/export/data/dp59.b/data/timmo/ARCHIVED'
+
+###################################
+
+# Maximum # of child processes, as reported by jobs
+MAXCHILDREN=8
+
+tapeDir="/pnfs"
+findPrefix="sdss/db2"
+srcDir="${tapeDir}/${findPrefix}"
+
+# "find" file is needed to verify that all payload files have been copied
+findFile="/home/s1/timmo/projects/sdss/pnfs-sdss-db2.find.gz"
+
+###################################
+
+# source rc file if it exists and is readable
+#RCFILE=~/.bagmakerrc
+#if [ -f ${RCFILE} ]; then
+#    if [ -r ${RCFILE} ]; then
+#	. ${RCFILE}
+#    else
+#	warn "* File \"${RCFILE}\" exists, but is not readable. Not loading."
+#    fi
+#else
+#    # warn "No rc file. Using defaults."
+#fi

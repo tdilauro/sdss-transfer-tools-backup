@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# get the bag sequence number
+seqNum=$1; shift
+
+# the rest is the list of sub-directories to clean up
+dirList=$@
+
+srcDir="/pnfs/sdss/db2/ImagingRaw"
+bagParentDir="/export/data/dp59.b/data/timmo/ImagingRaw"
+bagNamePrefix="ImagingRaw"
+bagCount=1063
+# bag naming convention: 
+bagDir="${bagParentDir}/${bagNamePrefix}-${seqNum}-of-${bagCount}"
+
+
+
+if [ ! -d "${bagDir}" ] ; then
+    echo "\"${bagDir}\" is not a bag directory" 1>&2
+    exit 1
+fi
+
+# clear the directories and re-attempt transfer from tape
+for dir in $dirList; do 
+
+    echo "*** Attempting to repair payload sub-directory \"${dir}\" (background process)" 
+
+     rm ${bagDir}/data/${dir}/* 	
+     encp ${srcDir}/${dir}/* ${bagDir}/data/${dir}/ &
+
+done

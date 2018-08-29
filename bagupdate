@@ -1,0 +1,81 @@
+#!/bin/bash
+# get some utility functions to help use out
+source "`dirname $0`/functions-util.sh" || ( echo "Couldn't source \"functions-util.sh\". Exiting." 1>&2 ; exit 1; )
+include 'functions-packaging' 'bagm-common'
+
+# Only argument should be a package name
+rc=0
+if [[ ( $# == 1 ) ]]; then
+    # verify package name format and drop properties into the environment
+    getPackageProperties $1
+    rc=$?
+else
+    rc=2
+fi
+if [[ ( ${rc} == 2 ) ]]; then
+    warn "${PROGNAME} - invalid argument: $@"
+    warn "Usage: ${PROGNAME} <bagprefix>-<sequence#>-of-<bagcount>"
+fi
+if [[ ( ${rc} != 0 ) ]]; then exit 1; fi
+
+
+#
+# Update the package
+#
+
+# The name of the Bagit bag directory is the same as the package name
+bagDir=${pkgName}
+
+
+log ${PROGPID} "$@ [starting...]"
+
+# ensure that ${bagDir} is a directory before writing bag-info.txt
+if [ ! -d "${bagDir}" ] ; then
+    log ${PROGPID} "cannot create \"bag-info.txt\". \"${bagDir}\" is not a bag directory. Exiting. [rc=1]"
+    exit 1
+elif [ ! -w "${bagDir}" ] ; then
+    log ${PROGPID} "cannot create \"bag-info.txt\". \"${bagDir}\" is not writeable. Exiting. [rc=1]"
+    exit 1
+fi
+
+# ensure that $dirUpdated exists and is rewriteable, so that we can move successfully updated bags there
+if [[ ( ! -d "${dirUpdated}" ) || ( ! -w "${dirUpdated}" ) ]] ; then
+    log ${PROGPID} "\"${dirUpdated}\" must be a writeable directory. Exiting. [rc=1]"
+    exit 1
+fi
+
+# substitute parameters in the bag-info.txt
+cat -- "${baginfoTemplate}" | sed -e "s/<SEQNUM>/$(sedesc $( printf %d $((10#${seqNum})) ))/g" -e "s/<BAGCOUNT>/$(sedesc ${numberOfPkgs})/g" -e "s/<EXT-DESC>/$(sedesc ${bagExternalDescription})/g" -e "s/<BAG-SCHEME>/$(sedesc ${bagScheme})/g" -e "s/<BAG-GRP-ID>/$(sedesc ${bagGroupIdentifier})/g" > ${bagDir}/bag-info.txt
+if [ $? != 0 ] ; then
+    rc=$?
+    log ${PROGPID} "error creating \"${bagDir}/bag-info.txt\" [rc=${rc}]"
+    exit ${rc}
+fi
+log ${PROGPID} "Generated bag-info.txt in \"${bagDir}/bag-info.txt\""
+
+
+# Update the bag in place to generate checksums.
+# If successful, move the directory to the ${dirUpdated} directory
+
+log ${PROGPID} "Running: \"bagit baginplace ${bagDir} --retainbasedir --keepemptydirs --verbose\"..."
+bagit baginplace ${bagDir} --retainbasedir --keepemptydirs --verbose
+if [ $? != 0 ] ; then
+    rc=$?
+    log ${PROGPID} "unable to update bag \"${bagDir}\" in place [rc=${rc}]"
+    exit ${rc}
+else
+    log ${PROGPID} "successfully updated  bag \"${bagDir}\""
+fi
+
+log ${PROGPID} "Moving  bag \"${bagDir}\" to \"${dirUpdated}\"..."
+mv "${bagDir}" "${dirUpdated}"
+if [ $? != 0 ] ; then
+    rc=$?
+    log ${PROGPID} "error moving bag \"${bagDir}\" to \"${dirUpdated}\" [rc=${rc}]"
+    exit ${rc}
+else
+    log ${PROGPID} "Moved  bag \"${bagDir}\" to \"${dirUpdated}\""
+fi
+
+log ${PROGPID} "$@ [exiting]"
+

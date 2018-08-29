@@ -1,0 +1,99 @@
+#!/bin/bash
+# get some utility functions to help use out
+source "`dirname $0`/functions-util.sh" || ( echo "Couldn't source \"functions-util.sh\". Exiting." 1>&2 ; exit 1; )
+# now load the files we need
+include 'bagm-common'
+
+# Only argument should be a package name
+rc=0
+if [[ ( $# == 1 ) ]]; then
+    # verify package name format and drop properties into the environment
+    getPackageProperties $1
+    rc=$?
+else
+    rc=2
+fi
+if [[ ( ${rc} == 2 ) ]]; then
+    warn "${PROGNAME} - invalid argument: $@"
+    warn "Usage: ${PROGNAME} <bagprefix>-<sequence#>-of-<bagcount>"
+fi
+if [[ ( ${rc} != 0 ) ]]; then
+    log ${PROGPID} "${pkgName}: Possible configuration error. [rc=8]"
+    exit 8
+fi
+
+
+pkgDir=${pkgName}
+srcDir="${srcDir}/${relPath}"
+
+payloadDir="${pkgDir}/data"
+mkdir -p $payloadDir || die $? $( log ${PROGPID} "${pkgName}: couldn't make bag payload directory \"${payloadDir}\"" )
+
+
+# list of subdirectories for a given array
+dirList=$( cat $invFile | grep "^${pkgName}," | cut -d, -f2- )
+dirCount=$( echo "${dirList}" | wc -w )
+log ${PROGPID} "${pkgName}: There are ${dirCount} subdirectories in this package."
+if [[ ( ${dirCount} == 0 ) ]]; then
+    log ${PROGPID} "${pkgName}: No entries for this package. POSSIBLE CONFIGURATION ERROR. [rc=8]"
+    exit 8
+fi
+
+##################################
+# transfer the content from tape #
+##################################
+# NB: encp is ** not capable of recursive directory copy ** and only files can be specified as source
+# encp --usage
+# Usage: 
+#       encp [OPTIONS]... <source file> <destination file>
+#       encp [OPTIONS]... <source file> [source file [...]] <destination directory>
+#
+# This section uses multiple threads
+if [ -f "/fnal/ups/etc/setups.sh" ]
+then
+    . "/fnal/ups/etc/setups.sh"
+fi
+setup -q stken encp
+
+# setup the wait to hold until all the children finish up
+trap " log ${PROGPID} 'waiting for child jobs to end...'; wait; log ${PROGPID} 'child jobs finished' " TERM
+
+for dir in $dirList; do 
+    # check to see this is a directory, if not, we'll assume it's a file
+    if [ -d "${srcDir}/${dir}" ]; then
+	file='*'
+    else
+	file="${dir##*/}"      # get everything after the last slash ('/'), if there is one, else get everything
+	dir="${dir%${file}}"   # strip the value of $file from the end of the directory
+	dir="${dir%/}"         # ... then strip of trailing slash ('/'), if there is one
+    fi
+
+    if [ ! -d "${payloadDir}/${dir}" ]; then
+	mkdir -p "${payloadDir}/${dir}" || die $? $( log ${PROGPID} "${pkgName}: couldn't make directory \"${payloadDir}/${dir}\"" )
+    fi
+
+    while (( $(jobs | wc -l) >= ${MAXCHILDREN} )); do
+        sleep 1
+        jobs > /dev/null
+     done
+
+    log ${PROGPID} "Package ${pkgName} loading \"${srcDir}/${dir}/${file}\" to \"${payloadDir}/${dir}\"";
+
+    #############################################
+    # This is the command with multiple threads #
+    #############################################
+    encp ${srcDir}/${dir}/${file} "${payloadDir}/${dir}"  &
+done
+# wait for all of the async processes to complete
+wait
+# clear the trap
+trap - TERM
+
+###########################################################
+# At this point, all the data should be loaded from tape. #
+###########################################################
+
+# Run bagchkfiles to verify that everything was successfully copied
+log ${PROGPID} "Validating proto package with \"bagchkfiles ${pkgName}\""
+"${PROGHOME}/bagchkfiles" "${pkgName}"
+exit $?

@@ -1,0 +1,121 @@
+#!/bin/bash
+# get some utility functions to help use out
+source "`dirname $0`/functions-util.sh" || ( echo "Couldn't source \"functions-util.sh\". Exiting." 1>&2 ; exit 1; )
+# now load the files we need
+include 'bagm-common'
+
+# Only argument should be a package name
+rc=0
+if [[ ( $# == 1 ) ]]; then
+    # verify package name format and drop properties into the environment
+    getPackageProperties $1
+    rc=$?
+else
+    rc=2
+fi
+if [[ ( ${rc} == 2 ) ]]; then
+    warn "${PROGNAME} - invalid argument: $@"
+    warn "Usage: ${PROGNAME} <bagprefix>-<sequence#>-of-<bagcount>"
+fi
+if [[ ( ${rc} != 0 ) ]]; then exit 1; fi
+
+pkgDir=${pkgName}
+payloadDir="${pkgDir}/data"
+srcDir="${srcDir}/${relPath}"
+
+OIFS=$IFS;
+
+
+# list of subdirectories for a given array
+dirList=$( cat $invFile | grep "^${pkgName}," | cut -d, -f2- )
+
+dirCount=$( echo "${dirList}" | wc -w )
+log ${PROGPID} "${pkgName}: There are ${dirCount} entries for this package."
+
+### END (code similar to bag/pkgmaker code)
+
+
+# start with 0 errors
+errors=0
+
+verifiedDirectories=0
+verifiedFiles=0
+
+log ${PROGPID} "${pkgName}: * Verifying all content copied to pkg..."
+# directory level
+dirErrorList=""
+dirErrors=0
+fileErrors=0
+
+for dir in $dirList; do 
+    IFS=$NL
+    thisDirError=0
+
+    # call getDirFileList, instead of this next block
+
+    # get list of files from "find" file (though, perhaps should retrieve directly from /pnfs dir)
+    # NB: ${relPath} is from the current package prefix config file
+
+    base='sdss/db2'
+    matchEntry=$( echo "${base}/${relPath}/${dir}" | sed -e 's/\([[\.*+]\|\]\)/\\&/g' )
+    matchRel=$( echo "${base}/${relPath}" | sed -e 's/\([[\.*+]\|\]\)/\\&/g' )
+    fl=$( zcat ${findFile} | 
+	grep -P -- "\b${matchEntry}(/.*)?$" |
+	grep -- '^f' | 
+	cut -d'|' -f1,7,10 |  
+	sed -e "s|${matchRel}/||";
+	echo -n 'x' ); fl=${fl%x}
+
+    # echo "*** FL${NL}${fl}***"
+
+    fileList=( $fl )
+
+    # echo "* File list: ${fileList[@]}"
+    fileCount=${#fileList[@]}
+    thisDirBagFiles=$( find "${payloadDir}/${dir}" -type f | wc -l )
+
+    if [ "${fileCount}" -ne "${thisDirBagFiles}" ]; then
+	log ${PROGPID} "Entry \"${dir}\" should have $fileCount associated file(s), but package contains ${thisDirBagFiles} files"
+	((errors++))
+    fi
+
+
+    for fileAttribs in ${fileList[@]}; do
+	thisFileError=0
+	# echo "File attributes: $fileAttribs"
+	IFS='| ' read -a f <<< "${fileAttribs}"
+	fname="${f[2]}"
+	fsize=${f[1]}
+	srcFile="${srcDir}/${fname}"
+	pldFile="${payloadDir}/${fname}"
+
+	srcSize=$( stat -c '%s' ${srcFile} )
+	pldSize=$( stat -c '%s' ${pldFile} )
+	if [ ! -f "$pldFile" ] ; then ((thisFileError++)) ; log ${PROGPID} "${pkgName}: missing bagit payload file: \"${pldFile}\" "; fi
+	if [ ! -f "$srcFile" ] ; then ((thisFileError++)) ; log ${PROGPID} "${pkgName}: missing source file: \"${srcFile}\" "; fi
+	if [ ! "${fsize}" == "${srcSize}" ] ; then ((thisFileError++)) ; log ${PROGPID} "${pkgName}: size mismatch for src file \"${srcFile}\" (${srcSize}) vs. ref (${fsize})" ; fi
+	if [ ! "${fsize}" == "${pldSize}" ] ; then ((thisFileError++)) ; log ${PROGPID} "${pkgName}: size mismatch for bagit payload file \"${pldFile}\" (${pldSize}) vs. ref (${fsize})"; fi
+	# echo "File: ${fname} - sizes: ref=${fsize}, src=${srcSize}, bag=${pldSize}"
+	# echo "Size: ${fsize} for file \"${fname}\" "
+
+	((verifiedFiles++))
+	if [ "${thisFileError}" -gt 0 ]; then
+	    thisDirError=1
+	    ((errors++))
+	    ((fileErrors++))
+	fi
+    done
+
+    ((verifiedDirectories++))
+    if [ "${thisDirError}" -gt 0 ]; then
+	((dirErrors++))
+	dirErrorList="${dirErrorList} ${dir}"
+    fi
+done
+IFS=$OIFS
+
+log ${PROGPID} "${pkgName}: ${errors} error(s) encountered verifying ${verifiedDirectories} entries containing ${verifiedFiles} files"
+if [ "$errors" -gt 0 ]; then 
+    log ${PROGPID} "${pkgName}: Error summary: ${fileErrors} file(s) in ${dirErrors} entries: ${dirErrorList}"
+    exit 1
+ fi

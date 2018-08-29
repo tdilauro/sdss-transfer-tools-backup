@@ -1,0 +1,22 @@
+#! /bin/bash
+
+RELPATH=bagit-4.3/bin/bag
+
+# DO NOT EDIT BELOW THIS LINE
+
+PRG=$0
+
+# need this for relative symlinks
+while [ -h "$PRG" ] ; do
+    ls=`ls -ld "$PRG"`
+    link=`expr "$ls" : '.*-> \(.*\)$'`
+    if expr "$link" : '/.*' > /dev/null; then
+      PRG="$link"
+    else
+      PRG="`dirname "$PRG"`/$link"
+    fi
+done
+
+APP=`dirname $PRG`/$RELPATH
+
+"$APP" $@
